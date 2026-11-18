@@ -362,6 +362,19 @@ input::placeholder {
   font-size: 10px;
 }
 
+.sort-picker {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.sort-picker select {
+  min-width: 180px;
+  padding: 0 32px 0 11px;
+  font-size: 12px;
+}
+
 .profile-picker select {
   min-width: 165px;
   padding: 0 32px 0 11px;
@@ -779,6 +792,7 @@ input::placeholder {
   }
 
   .profile-picker select,
+  .sort-picker select,
   .search-box input {
     width: 100%;
   }

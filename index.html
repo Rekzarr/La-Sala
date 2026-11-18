@@ -62,6 +62,15 @@
           <h2>La colección <span id="movieCount" class="count-badge">0</span></h2>
         </div>
         <div class="collection-tools">
+          <label class="sort-picker">
+            <span>Ordenar por</span>
+            <select id="sortSelect" aria-label="Ordenar películas">
+              <option value="added">Añadidas primero</option>
+              <option value="title">Título A-Z</option>
+              <option value="rating-desc">Nota: mayor a menor</option>
+              <option value="rating-asc">Nota: menor a mayor</option>
+            </select>
+          </label>
           <label class="profile-picker">
             <span>Estoy puntuando como</span>
             <select id="memberSelect" aria-label="Perfil para puntuar"></select>

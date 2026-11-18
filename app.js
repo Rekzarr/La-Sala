@@ -16,6 +16,7 @@
   let state;
   let activeFilter = "all";
   let searchTerm = "";
+  let activeSort = "added";
   let editingMovieId = null;
   let messageTimer;
   let suggestionTimer;
@@ -300,11 +301,47 @@
         (activeFilter === "watched" && movie.watched);
       return matchesFilter && movie.title.toLocaleLowerCase("es").includes(searchTerm);
     });
+    const withSort = filtered.slice();
+    withSort.sort(function (left, right) {
+      if (activeSort === "title") {
+        return left.title.localeCompare(right.title, "es", { sensitivity: "base" });
+      }
+
+      if (activeSort === "rating-desc" || activeSort === "rating-asc") {
+        const leftScores = Object.keys(left.ratings).map(function (id) {
+          return left.ratings[id];
+        }).filter(function (score) {
+          return typeof score === "number";
+        });
+        const rightScores = Object.keys(right.ratings).map(function (id) {
+          return right.ratings[id];
+        }).filter(function (score) {
+          return typeof score === "number";
+        });
+        const leftAverage = leftScores.length ? leftScores.reduce(function (sum, score) { return sum + score; }, 0) / leftScores.length : null;
+        const rightAverage = rightScores.length ? rightScores.reduce(function (sum, score) { return sum + score; }, 0) / rightScores.length : null;
+
+        if (leftAverage === null && rightAverage === null) {
+          return 0;
+        }
+        if (leftAverage === null) {
+          return 1;
+        }
+        if (rightAverage === null) {
+          return -1;
+        }
+        return activeSort === "rating-desc"
+          ? rightAverage - leftAverage
+          : leftAverage - rightAverage;
+      }
+
+      return 0;
+    });
 
     document.getElementById("movieCount").textContent = String(state.movies.length);
-    movieList.innerHTML = filtered.map(renderMovie).join("");
-    emptyState.hidden = filtered.length !== 0;
-    if (!filtered.length) {
+    movieList.innerHTML = withSort.map(renderMovie).join("");
+    emptyState.hidden = withSort.length !== 0;
+    if (!withSort.length) {
       const hasMovies = state.movies.length > 0;
       document.getElementById("emptyTitle").textContent = hasMovies ? "No hay resultados" : "Aún no hay películas";
       document.getElementById("emptyCopy").textContent = hasMovies
@@ -419,6 +456,11 @@
 
   document.getElementById("searchInput").addEventListener("input", function (event) {
     searchTerm = event.target.value.trim().toLocaleLowerCase("es");
+    render();
+  });
+
+  document.getElementById("sortSelect").addEventListener("change", function (event) {
+    activeSort = event.target.value;
     render();
   });
 
