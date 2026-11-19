@@ -530,7 +530,7 @@
   document.getElementById("newGroupButton").addEventListener("click", function () {
     document.getElementById("groupSelectDialog").value = "";
     editingGroupId = null;
-    document.getElementById("groupName").value = "";
+    document.getElementById("groupName").value = "Nuevo grupo";
     MEMBER_IDS.forEach(function (id, index) {
       membersForm.elements["member" + (index + 1)].value = "";
     });
@@ -774,15 +774,11 @@
       return membersForm.elements["member" + (index + 1)].value.trim();
     });
     const firstTwoNames = names.slice(0, 2);
-    const groupName = document.getElementById("groupName").value.trim();
+    let groupName = document.getElementById("groupName").value.trim();
     const providedNames = names.filter(Boolean);
     const normalized = providedNames.map(function (name) {
       return name.toLocaleLowerCase("es");
     });
-    if (!groupName) {
-      document.getElementById("membersError").textContent = "Escribe un nombre para el grupo.";
-      return;
-    }
     if (firstTwoNames.some(function (name) { return !name; })) {
       document.getElementById("membersError").textContent = "Un grupo necesita al menos dos personas.";
       return;
@@ -797,6 +793,9 @@
     let group = selectedGroupId
       ? next.groups.find(function (item) { return item.id === selectedGroupId; })
       : null;
+    if (!groupName) {
+      groupName = group ? group.name : "Grupo " + (next.groups.length + 1);
+    }
     const previousMemberIds = group ? group.memberIds.slice() : [];
     if (!group) {
       group = {

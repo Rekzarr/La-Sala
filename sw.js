@@ -1,6 +1,6 @@
 "use strict";
 
-const CACHE_NAME = "la-sala-shell-v2";
+const CACHE_NAME = "la-sala-shell-v3";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -67,21 +67,18 @@ self.addEventListener("fetch", function (event) {
   }
 
   event.respondWith(
-    caches.match(request)
-      .then(function (cachedResponse) {
-        if (cachedResponse) {
-          return cachedResponse;
+    fetch(request)
+      .then(function (response) {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then(function (cache) {
+            return cache.put(request, copy);
+          });
         }
-
-        return fetch(request).then(function (response) {
-          if (response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE_NAME).then(function (cache) {
-              return cache.put(request, copy);
-            });
-          }
-          return response;
-        });
+        return response;
+      })
+      .catch(function () {
+        return caches.match(request);
       })
   );
 });
