@@ -18,6 +18,7 @@
   let searchTerm = "";
   let activeSort = "added";
   let editingMovieId = null;
+  let editingGroupId = null;
   let messageTimer;
   let suggestionTimer;
   let suggestionRequest = 0;
@@ -487,7 +488,7 @@
 
   function openMembersDialog() {
     const groupSelectDialog = document.getElementById("groupSelectDialog");
-    groupSelectDialog.innerHTML = state.groups.map(function (group) {
+    groupSelectDialog.innerHTML = '<option value="">Nuevo grupo…</option>' + state.groups.map(function (group) {
       return '<option value="' + escapeHtml(group.id) + '">' + escapeHtml(group.name) + "</option>";
     }).join("");
 
@@ -495,6 +496,7 @@
     if (selectedId) {
       populateGroupDialog(selectedId);
     } else {
+      editingGroupId = null;
       document.getElementById("groupName").value = "";
       MEMBER_IDS.forEach(function (id, index) {
         membersForm.elements["member" + (index + 1)].value = "";
@@ -511,6 +513,7 @@
   function populateGroupDialog(groupId) {
     const groupSelectDialog = document.getElementById("groupSelectDialog");
     groupSelectDialog.value = groupId;
+    editingGroupId = groupId || null;
     const group = state.groups.find(function (item) { return item.id === groupId; });
     document.getElementById("groupName").value = group ? group.name : "";
     MEMBER_IDS.forEach(function (id, index) {
@@ -526,6 +529,7 @@
 
   document.getElementById("newGroupButton").addEventListener("click", function () {
     document.getElementById("groupSelectDialog").value = "";
+    editingGroupId = null;
     document.getElementById("groupName").value = "";
     MEMBER_IDS.forEach(function (id, index) {
       membersForm.elements["member" + (index + 1)].value = "";
@@ -534,7 +538,7 @@
   });
 
   document.getElementById("deleteGroupButton").addEventListener("click", function () {
-    const groupId = document.getElementById("groupSelectDialog").value;
+    const groupId = editingGroupId;
     if (!groupId || state.groups.length <= 1) {
       showMessage("Debe quedar al menos un grupo.", true);
       return;
@@ -768,29 +772,32 @@
     event.preventDefault();
     const names = MEMBER_IDS.map(function (id, index) {
       return membersForm.elements["member" + (index + 1)].value.trim();
-    }).filter(Boolean);
+    });
+    const firstTwoNames = names.slice(0, 2);
     const groupName = document.getElementById("groupName").value.trim();
-    const normalized = names.map(function (name) {
+    const providedNames = names.filter(Boolean);
+    const normalized = providedNames.map(function (name) {
       return name.toLocaleLowerCase("es");
     });
     if (!groupName) {
       document.getElementById("membersError").textContent = "Escribe un nombre para el grupo.";
       return;
     }
-    if (names.length < 2) {
+    if (firstTwoNames.some(function (name) { return !name; })) {
       document.getElementById("membersError").textContent = "Un grupo necesita al menos dos personas.";
       return;
     }
-    if (new Set(normalized).size !== names.length) {
+    if (new Set(normalized).size !== providedNames.length) {
       document.getElementById("membersError").textContent = "Usad un nombre distinto para cada perfil.";
       return;
     }
 
     const next = cloneState();
-    const selectedGroupId = document.getElementById("groupSelectDialog").value;
+    const selectedGroupId = editingGroupId;
     let group = selectedGroupId
       ? next.groups.find(function (item) { return item.id === selectedGroupId; })
       : null;
+    const previousMemberIds = group ? group.memberIds.slice() : [];
     if (!group) {
       group = {
         id: "group-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
@@ -802,7 +809,19 @@
       group.name = groupName;
     }
 
-    group.memberIds = names.map(function (name) {
+    group.memberIds = names.map(function (name, index) {
+      if (!name) {
+        return null;
+      }
+      if (group && previousMemberIds[index]) {
+        const existing = next.members.find(function (member) {
+          return member.id === previousMemberIds[index];
+        });
+        if (existing) {
+          existing.name = name;
+          return existing.id;
+        }
+      }
       const existing = next.members.find(function (member) {
         return member.name.toLocaleLowerCase("es") === name.toLocaleLowerCase("es");
       });
@@ -816,6 +835,24 @@
       };
       next.members.push(member);
       return member.id;
+    }).filter(Boolean);
+    previousMemberIds.forEach(function (memberId) {
+      if (!group.memberIds.includes(memberId)) {
+        next.movies.forEach(function (movie) {
+          if (movie.ratings[group.id]) {
+            delete movie.ratings[group.id][memberId];
+          }
+        });
+      }
+    });
+    const referencedMemberIds = new Set();
+    next.groups.forEach(function (item) {
+      item.memberIds.forEach(function (memberId) {
+        referencedMemberIds.add(memberId);
+      });
+    });
+    next.members = next.members.filter(function (member) {
+      return referencedMemberIds.has(member.id);
     });
     next.currentGroupId = group.id;
     next.currentMemberId = group.memberIds[0];
