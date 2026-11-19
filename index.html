@@ -29,7 +29,7 @@
   <main class="page">
     <section class="intro">
       <p class="eyebrow">VUESTRA COLECCIÓN</p>
-      <h1>Una película,<br><span>cuatro opiniones.</span></h1>
+      <h1>Una película,<br><span>varias opiniones.</span></h1>
       <p class="intro-copy">Guardad lo que veis, votad por turnos y descubrid vuestra nota media.</p>
     </section>
 
@@ -75,6 +75,10 @@
             <span>Estoy puntuando como</span>
             <select id="memberSelect" aria-label="Perfil para puntuar"></select>
           </label>
+          <label class="profile-picker">
+            <span>Grupo</span>
+            <select id="groupSelect" aria-label="Grupo para puntuar"></select>
+          </label>
           <label class="search-box">
             <span class="sr-only">Buscar películas</span>
             <span aria-hidden="true">⌕</span>
@@ -108,16 +112,22 @@
     <form id="membersForm" method="dialog">
       <p class="eyebrow">EL GRUPO</p>
       <h2 id="membersDialogTitle">¿Quiénes sois?</h2>
-      <p class="modal-copy">Guardaremos estos cuatro perfiles en este dispositivo para que no tengáis que volver a escribirlos.</p>
+      <p class="modal-copy">Cada grupo puede tener entre dos y cuatro perfiles. Puedes crear tantos grupos como necesites.</p>
       <div class="member-fields">
-        <label><span>Persona 1</span><input name="member1" maxlength="32" autocomplete="off" required></label>
-        <label><span>Persona 2</span><input name="member2" maxlength="32" autocomplete="off" required></label>
-        <label><span>Persona 3</span><input name="member3" maxlength="32" autocomplete="off" required></label>
-        <label><span>Persona 4</span><input name="member4" maxlength="32" autocomplete="off" required></label>
+        <label><span>Grupo guardado</span><select id="groupSelectDialog" aria-label="Grupo guardado"></select></label>
+        <label><span>Nombre del grupo</span><input id="groupName" maxlength="32" autocomplete="off" required></label>
+      </div>
+      <div class="member-fields">
+        <label><span>Persona 1 *</span><input name="member1" maxlength="32" autocomplete="off" required></label>
+        <label><span>Persona 2 *</span><input name="member2" maxlength="32" autocomplete="off" required></label>
+        <label><span>Persona 3 (opcional)</span><input name="member3" maxlength="32" autocomplete="off"></label>
+        <label><span>Persona 4 (opcional)</span><input name="member4" maxlength="32" autocomplete="off"></label>
       </div>
       <p class="form-error" id="membersError" aria-live="polite"></p>
       <div class="modal-actions">
         <button class="button button-quiet" id="cancelMembersButton" type="button">Cancelar</button>
+        <button class="button button-quiet" id="newGroupButton" type="button">Nuevo grupo</button>
+        <button class="button button-quiet" id="deleteGroupButton" type="button">Eliminar grupo</button>
         <button class="button button-primary" type="submit">Guardar perfiles</button>
       </div>
     </form>

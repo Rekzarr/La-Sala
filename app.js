@@ -24,33 +24,99 @@
 
   function emptyData() {
     return {
-      version: 1,
+      version: 3,
       members: [],
+      groups: [],
       currentMemberId: "",
+      currentGroupId: "",
       movies: []
     };
   }
 
   function validateData(data, allowEmptyGroup) {
-    if (!data || data.version !== 1 || !Array.isArray(data.members) || !Array.isArray(data.movies)) {
+    if (!data || (data.version !== 1 && data.version !== 2 && data.version !== 3) || !Array.isArray(data.members) || !Array.isArray(data.movies)) {
       throw new Error("El archivo no tiene el formato de copia esperado.");
     }
 
-    if (data.members.length !== 4 && !(allowEmptyGroup && data.members.length === 0)) {
-      throw new Error("La copia debe contener exactamente cuatro perfiles.");
+    if (data.version === 1 || data.version === 2) {
+      if (data.members.length < 2 || data.members.length > 4) {
+        throw new Error("Cada grupo debe contener entre dos y cuatro perfiles.");
+      }
+      const legacyMembers = data.members;
+      data.groups = [{
+        id: "group-1",
+        name: "Mi grupo",
+        memberIds: legacyMembers.map(function (member) { return member.id; })
+      }];
+      data.currentGroupId = "group-1";
+      data.currentMemberId = legacyMembers.some(function (member) { return member.id === data.currentMemberId; })
+        ? data.currentMemberId
+        : legacyMembers[0].id;
+      data.movies.forEach(function (movie) {
+        const nestedRatings = {};
+        Object.keys(movie.ratings || {}).forEach(function (memberId) {
+          let score = movie.ratings[memberId];
+          if (data.version === 1) {
+            if (!Number.isInteger(score) || score < 1 || score > 10) {
+              throw new Error("Una de las puntuaciones de la copia no es válida.");
+            }
+            score = score / 2;
+          }
+          if (!Number.isFinite(score) || score < 0 || score > 5) {
+            throw new Error("Una de las puntuaciones de la copia no es válida.");
+          }
+          nestedRatings["group-1"] = nestedRatings["group-1"] || {};
+          nestedRatings["group-1"][memberId] = score;
+        });
+        movie.ratings = nestedRatings;
+      });
     }
 
+    if (data.groups === undefined) {
+      data.groups = [];
+    }
+    if (data.members.length === 0 && allowEmptyGroup && data.groups.length === 0) {
+      data.version = 3;
+      return data;
+    }
+    if (!Array.isArray(data.groups) || data.groups.length === 0) {
+      throw new Error("La copia debe contener al menos un grupo.");
+    }
+
+    const groupIds = new Set();
     const ids = new Set();
-    data.members.forEach(function (member, index) {
-      if (!member || member.id !== MEMBER_IDS[index] || typeof member.name !== "string" ||
-          !member.name.trim() || member.name.length > 32 || ids.has(member.id)) {
-        throw new Error("Los nombres o perfiles de la copia no son válidos.");
+    data.groups.forEach(function (group) {
+      if (!group || typeof group.id !== "string" || !group.id || typeof group.name !== "string" ||
+          !group.name.trim() || group.name.length > 32 || groupIds.has(group.id) ||
+          !Array.isArray(group.memberIds) || group.memberIds.length < 2 || group.memberIds.length > 4) {
+        throw new Error("Los grupos de la copia no son válidos.");
       }
-      ids.add(member.id);
+      groupIds.add(group.id);
+      group.memberIds.forEach(function (memberId) {
+        if (!ids.has(memberId)) {
+          const member = data.members.find(function (item) { return item.id === memberId; });
+          if (!member) {
+            throw new Error("Uno de los perfiles del grupo no existe.");
+          }
+        }
+        ids.add(memberId);
+      });
     });
 
-    if (data.members.length === 4 && !ids.has(data.currentMemberId)) {
-      throw new Error("El perfil seleccionado en la copia no es válido.");
+    data.members.forEach(function (member) {
+      if (!member || typeof member.id !== "string" || !member.id ||
+          typeof member.name !== "string" || !member.name.trim() ||
+          member.name.length > 32 || ids.has(member.id) === false) {
+        throw new Error("Los nombres o perfiles de la copia no son válidos.");
+      }
+    });
+
+    if (!groupIds.has(data.currentGroupId)) {
+      data.currentGroupId = data.groups[0].id;
+    }
+    const activeGroup = data.groups.find(function (group) { return group.id === data.currentGroupId; });
+    if (!activeGroup.memberIds.includes(data.currentMemberId)) {
+      data.currentMemberId = activeGroup.memberIds[0];
     }
 
     const movieIds = new Set();
@@ -64,14 +130,25 @@
       }
 
       movieIds.add(movie.id);
-      Object.keys(movie.ratings).forEach(function (memberId) {
-        const score = movie.ratings[memberId];
-        if (!ids.has(memberId) || !Number.isInteger(score) || score < 1 || score > 10) {
+      Object.keys(movie.ratings).forEach(function (groupId) {
+        const group = data.groups.find(function (item) { return item.id === groupId; });
+        if (!group) {
+          throw new Error("Una de las puntuaciones pertenece a un grupo inexistente.");
+        }
+        const ratings = movie.ratings[groupId];
+        if (!ratings || typeof ratings !== "object") {
           throw new Error("Una de las puntuaciones de la copia no es válida.");
         }
+        Object.keys(ratings).forEach(function (memberId) {
+          const score = ratings[memberId];
+          if (!group.memberIds.includes(memberId) || !Number.isFinite(score) || score < 0 || score > 5) {
+            throw new Error("Una de las puntuaciones de la copia no es válida.");
+          }
+        });
       });
     });
 
+    data.version = 3;
     return data;
   }
 
@@ -205,26 +282,72 @@
 
   function renderMemberPicker() {
     const select = document.getElementById("memberSelect");
-    select.innerHTML = state.members.map(function (member) {
+    const activeGroup = getActiveGroup();
+    if (!activeGroup) {
+      select.innerHTML = "";
+      return;
+    }
+    const members = activeGroup.memberIds.map(function (memberId) {
+      return state.members.find(function (member) { return member.id === memberId; });
+    }).filter(Boolean);
+    select.innerHTML = members.map(function (member) {
       return '<option value="' + escapeHtml(member.id) + '">' + escapeHtml(member.name) + "</option>";
     }).join("");
     select.value = state.currentMemberId;
   }
 
+  function getActiveGroup() {
+    return state.groups.find(function (group) { return group.id === state.currentGroupId; }) || null;
+  }
+
+  function getGroupMembers(group) {
+    return group.memberIds.map(function (memberId) {
+      return state.members.find(function (member) { return member.id === memberId; });
+    }).filter(Boolean);
+  }
+
+  function renderGroupPicker() {
+    const select = document.getElementById("groupSelect");
+    select.innerHTML = state.groups.map(function (group) {
+      return '<option value="' + escapeHtml(group.id) + '">' + escapeHtml(group.name) + "</option>";
+    }).join("");
+    select.value = state.currentGroupId;
+  }
+
   function ratingOptions(selected) {
     let options = '<option value="">Elige…</option>';
-    for (let score = 1; score <= 10; score += 1) {
-      options += '<option value="' + score + '"' + (score === selected ? " selected" : "") + ">" + score + "</option>";
+    for (let step = 0; step <= 50; step += 1) {
+      const score = step / 10;
+      const label = score.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+      options += '<option value="' + score + '"' + (score === selected ? " selected" : "") + ">★ " + label + " / 5</option>";
     }
     return options;
   }
 
-  function renderMovie(movie) {
-    const votes = Object.keys(movie.ratings);
-    const isComplete = state.members.every(function (member) {
-      return Object.prototype.hasOwnProperty.call(movie.ratings, member.id);
+  function starRating(score) {
+    const safeScore = Math.max(0, Math.min(5, Number(score) || 0));
+    const width = (safeScore / 5 * 100).toFixed(1);
+    const label = safeScore.toLocaleString("es-ES", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1
     });
-    const memberVote = movie.ratings[state.currentMemberId];
+    return '<span class="star-rating" role="img" aria-label="' + label + ' de 5 estrellas">' +
+      '<span class="star-empty" aria-hidden="true">★★★★★</span>' +
+      '<span class="star-fill" aria-hidden="true" style="width:' + width + '%">★★★★★</span>' +
+      '</span>';
+  }
+
+  function renderMovie(movie) {
+    const activeGroup = getActiveGroup();
+    const groupMembers = activeGroup ? getGroupMembers(activeGroup) : [];
+    const groupRatings = activeGroup && movie.ratings[activeGroup.id]
+      ? movie.ratings[activeGroup.id]
+      : {};
+    const votes = Object.keys(groupRatings);
+    const isComplete = groupMembers.every(function (member) {
+      return Object.prototype.hasOwnProperty.call(groupRatings, member.id);
+    });
+    const memberVote = groupRatings[state.currentMemberId];
     const isEditing = editingMovieId === movie.id;
     const stateLabel = movie.watched ? "VISTA" : "PENDIENTE";
     let voteContent = "";
@@ -232,25 +355,33 @@
     if (!movie.watched) {
       voteContent = '<p class="vote-info">Cuando la veáis, marcadla como vista para empezar a puntuar.</p>';
     } else if (isComplete) {
-      const total = state.members.reduce(function (sum, member) {
-        return sum + movie.ratings[member.id];
+      const total = groupMembers.reduce(function (sum, member) {
+        return sum + groupRatings[member.id];
       }, 0);
-      const average = (total / state.members.length).toLocaleString("es-ES", {
+      const averageScore = total / groupMembers.length;
+      const average = averageScore.toLocaleString("es-ES", {
         minimumFractionDigits: 1,
         maximumFractionDigits: 1
       });
-      const scores = state.members.map(function (member) {
-        return '<span class="score-chip">' + escapeHtml(member.name) + " · " + movie.ratings[member.id] + "</span>";
+      const scores = groupMembers.map(function (member) {
+        const scoreValue = groupRatings[member.id];
+        const score = scoreValue.toLocaleString("es-ES", {
+          minimumFractionDigits: 1,
+          maximumFractionDigits: 1
+        });
+        return '<span class="score-chip">' + escapeHtml(member.name) + " · " +
+          starRating(scoreValue) + ' <b>' + score + "</b></span>";
       }).join("");
-      voteContent = '<div class="score-summary"><div class="average-score">★ ' + average +
-        ' <small>/ 10 media</small></div><div class="member-scores">' + scores + "</div></div>";
+      voteContent = '<div class="score-summary"><div class="average-score">' + starRating(averageScore) + ' <b>' + average + '</b>' +
+        ' <small>/ 5 media</small></div><div class="member-scores">' + scores + "</div></div>";
       if (memberVote !== undefined && !isEditing) {
         voteContent += '<p class="vote-info">Votación completa. Puedes cambiar tu nota si lo necesitas.</p>';
       }
     } else if (memberVote !== undefined && !isEditing) {
-      voteContent = '<p class="vote-info">Tu voto está guardado. Las notas y la media se mostrarán cuando voten los cuatro.</p>';
+      voteContent = '<p class="vote-info">Tu voto está guardado. Las notas y la media se mostrarán cuando hayan votado todos los integrantes.</p>';
     } else {
-      voteContent = '<p class="vote-info">' + votes.length + " de 4 votos · notas ocultas hasta completar la votación.</p>";
+      voteContent = '<p class="vote-info">' + votes.length + " de " + groupMembers.length +
+        " votos · notas ocultas hasta completar la votación.</p>";
     }
 
     const showRatingForm = movie.watched && (!isComplete || isEditing);
@@ -285,7 +416,7 @@
 
   function render() {
     const memberSelect = document.getElementById("memberSelect");
-    const hasGroup = state.members.length === 4;
+    const hasGroup = state.groups.length > 0;
     document.getElementById("editMembersButton").disabled = !hasGroup;
     document.getElementById("backupButton").disabled = !hasGroup;
     workspace.hidden = !hasGroup;
@@ -295,6 +426,7 @@
     }
 
     renderMemberPicker();
+    renderGroupPicker();
     const filtered = state.movies.filter(function (movie) {
       const matchesFilter = activeFilter === "all" ||
         (activeFilter === "watchlist" && !movie.watched) ||
@@ -308,13 +440,15 @@
       }
 
       if (activeSort === "rating-desc" || activeSort === "rating-asc") {
-        const leftScores = Object.keys(left.ratings).map(function (id) {
-          return left.ratings[id];
+        const leftRatings = left.ratings[state.currentGroupId] || {};
+        const rightRatings = right.ratings[state.currentGroupId] || {};
+        const leftScores = Object.keys(leftRatings).map(function (id) {
+          return leftRatings[id];
         }).filter(function (score) {
           return typeof score === "number";
         });
-        const rightScores = Object.keys(right.ratings).map(function (id) {
-          return right.ratings[id];
+        const rightScores = Object.keys(rightRatings).map(function (id) {
+          return rightRatings[id];
         }).filter(function (score) {
           return typeof score === "number";
         });
@@ -352,19 +486,75 @@
   }
 
   function openMembersDialog() {
-    const names = state.members.map(function (member) {
-      return member.name;
-    });
-    MEMBER_IDS.forEach(function (id, index) {
-      membersForm.elements["member" + (index + 1)].value = names[index] || "";
-    });
-    document.getElementById("membersDialogTitle").textContent = state.members.length
-      ? "Vuestros perfiles"
+    const groupSelectDialog = document.getElementById("groupSelectDialog");
+    groupSelectDialog.innerHTML = state.groups.map(function (group) {
+      return '<option value="' + escapeHtml(group.id) + '">' + escapeHtml(group.name) + "</option>";
+    }).join("");
+
+    const selectedId = state.currentGroupId || (state.groups[0] && state.groups[0].id);
+    if (selectedId) {
+      populateGroupDialog(selectedId);
+    } else {
+      document.getElementById("groupName").value = "";
+      MEMBER_IDS.forEach(function (id, index) {
+        membersForm.elements["member" + (index + 1)].value = "";
+      });
+    }
+    document.getElementById("membersDialogTitle").textContent = state.groups.length
+      ? "Perfiles y grupos"
       : "¿Quiénes sois?";
-    document.getElementById("cancelMembersButton").hidden = state.members.length === 0;
+    document.getElementById("cancelMembersButton").hidden = state.groups.length === 0;
     document.getElementById("membersError").textContent = "";
     membersDialog.showModal();
   }
+
+  function populateGroupDialog(groupId) {
+    const groupSelectDialog = document.getElementById("groupSelectDialog");
+    groupSelectDialog.value = groupId;
+    const group = state.groups.find(function (item) { return item.id === groupId; });
+    document.getElementById("groupName").value = group ? group.name : "";
+    MEMBER_IDS.forEach(function (id, index) {
+      const memberId = group && group.memberIds[index];
+      const member = memberId && state.members.find(function (item) { return item.id === memberId; });
+      membersForm.elements["member" + (index + 1)].value = member ? member.name : "";
+    });
+  }
+
+  document.getElementById("groupSelectDialog").addEventListener("change", function (event) {
+    populateGroupDialog(event.target.value);
+  });
+
+  document.getElementById("newGroupButton").addEventListener("click", function () {
+    document.getElementById("groupSelectDialog").value = "";
+    document.getElementById("groupName").value = "";
+    MEMBER_IDS.forEach(function (id, index) {
+      membersForm.elements["member" + (index + 1)].value = "";
+    });
+    document.getElementById("groupName").focus();
+  });
+
+  document.getElementById("deleteGroupButton").addEventListener("click", function () {
+    const groupId = document.getElementById("groupSelectDialog").value;
+    if (!groupId || state.groups.length <= 1) {
+      showMessage("Debe quedar al menos un grupo.", true);
+      return;
+    }
+    if (!window.confirm("¿Eliminar este grupo y sus puntuaciones?")) {
+      return;
+    }
+    const next = cloneState();
+    next.groups = next.groups.filter(function (group) { return group.id !== groupId; });
+    next.movies.forEach(function (movie) {
+      delete movie.ratings[groupId];
+    });
+    next.currentGroupId = next.groups[0].id;
+    next.currentMemberId = next.groups[0].memberIds[0];
+    if (saveData(next)) {
+      membersDialog.close();
+      render();
+      showMessage("Grupo eliminado.");
+    }
+  });
 
   document.getElementById("apiKeyButton").addEventListener("click", openApiKeyDialog);
 
@@ -454,6 +644,20 @@
     }
   });
 
+  document.getElementById("groupSelect").addEventListener("change", function (event) {
+    const next = cloneState();
+    const group = next.groups.find(function (item) { return item.id === event.target.value; });
+    if (!group) {
+      return;
+    }
+    next.currentGroupId = group.id;
+    next.currentMemberId = group.memberIds[0];
+    editingMovieId = null;
+    if (saveData(next)) {
+      render();
+    }
+  });
+
   document.getElementById("searchInput").addEventListener("input", function (event) {
     searchTerm = event.target.value.trim().toLocaleLowerCase("es");
     render();
@@ -530,9 +734,14 @@
       return;
     }
     event.preventDefault();
-    const score = Number(new FormData(form).get("score"));
-    if (!Number.isInteger(score) || score < 1 || score > 10) {
-      showMessage("Elige una nota del 1 al 10.", true);
+    const rawScore = new FormData(form).get("score");
+    if (!rawScore) {
+      showMessage("Elige una nota del 0 al 5.", true);
+      return;
+    }
+    const score = Number(rawScore);
+    if (!Number.isFinite(score) || score < 0 || score > 5) {
+      showMessage("Elige una nota del 0 al 5.", true);
       return;
     }
 
@@ -544,7 +753,8 @@
       showMessage("No se pudo guardar el voto para esta película.", true);
       return;
     }
-    movie.ratings[next.currentMemberId] = score;
+    movie.ratings[next.currentGroupId] = movie.ratings[next.currentGroupId] || {};
+    movie.ratings[next.currentGroupId][next.currentMemberId] = score;
     if (saveData(next)) {
       editingMovieId = null;
       render();
@@ -558,12 +768,17 @@
     event.preventDefault();
     const names = MEMBER_IDS.map(function (id, index) {
       return membersForm.elements["member" + (index + 1)].value.trim();
-    });
+    }).filter(Boolean);
+    const groupName = document.getElementById("groupName").value.trim();
     const normalized = names.map(function (name) {
       return name.toLocaleLowerCase("es");
     });
-    if (names.some(function (name) { return !name; })) {
-      document.getElementById("membersError").textContent = "Escribid los cuatro nombres.";
+    if (!groupName) {
+      document.getElementById("membersError").textContent = "Escribe un nombre para el grupo.";
+      return;
+    }
+    if (names.length < 2) {
+      document.getElementById("membersError").textContent = "Un grupo necesita al menos dos personas.";
       return;
     }
     if (new Set(normalized).size !== names.length) {
@@ -572,12 +787,38 @@
     }
 
     const next = cloneState();
-    next.members = names.map(function (name, index) {
-      return { id: MEMBER_IDS[index], name: name };
-    });
-    if (!next.currentMemberId || !MEMBER_IDS.includes(next.currentMemberId)) {
-      next.currentMemberId = MEMBER_IDS[0];
+    const selectedGroupId = document.getElementById("groupSelectDialog").value;
+    let group = selectedGroupId
+      ? next.groups.find(function (item) { return item.id === selectedGroupId; })
+      : null;
+    if (!group) {
+      group = {
+        id: "group-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+        name: groupName,
+        memberIds: []
+      };
+      next.groups.push(group);
+    } else {
+      group.name = groupName;
     }
+
+    group.memberIds = names.map(function (name) {
+      const existing = next.members.find(function (member) {
+        return member.name.toLocaleLowerCase("es") === name.toLocaleLowerCase("es");
+      });
+      if (existing) {
+        existing.name = name;
+        return existing.id;
+      }
+      const member = {
+        id: "profile-" + Date.now() + "-" + Math.random().toString(36).slice(2, 7),
+        name: name
+      };
+      next.members.push(member);
+      return member.id;
+    });
+    next.currentGroupId = group.id;
+    next.currentMemberId = group.memberIds[0];
     if (saveData(next)) {
       membersDialog.close();
       render();
@@ -590,7 +831,7 @@
   });
 
   membersDialog.addEventListener("cancel", function (event) {
-    if (state.members.length === 0) {
+    if (state.groups.length === 0) {
       event.preventDefault();
     }
   });
@@ -644,7 +885,7 @@
   try {
     state = loadData();
     render();
-    if (state.members.length === 0) {
+    if (state.groups.length === 0) {
       openMembersDialog();
     }
   } catch (error) {
