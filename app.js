@@ -25,7 +25,7 @@
 
   function emptyData() {
     return {
-      version: 3,
+      version: 4,
       members: [],
       groups: [],
       currentMemberId: "",
@@ -35,7 +35,7 @@
   }
 
   function validateData(data, allowEmptyGroup) {
-    if (!data || (data.version !== 1 && data.version !== 2 && data.version !== 3) || !Array.isArray(data.members) || !Array.isArray(data.movies)) {
+    if (!data || (data.version !== 1 && data.version !== 2 && data.version !== 3 && data.version !== 4) || !Array.isArray(data.members) || !Array.isArray(data.movies)) {
       throw new Error("El archivo no tiene el formato de copia esperado.");
     }
 
@@ -66,10 +66,13 @@
           if (!Number.isFinite(score) || score < 0 || score > 5) {
             throw new Error("Una de las puntuaciones de la copia no es válida.");
           }
+          score = Math.max(1, score);
           nestedRatings["group-1"] = nestedRatings["group-1"] || {};
           nestedRatings["group-1"][memberId] = score;
         });
         movie.ratings = nestedRatings;
+        movie.groupId = "group-1";
+        movie.bonuses = {};
       });
     }
 
@@ -77,7 +80,7 @@
       data.groups = [];
     }
     if (data.members.length === 0 && allowEmptyGroup && data.groups.length === 0) {
-      data.version = 3;
+      data.version = 4;
       return data;
     }
     if (!Array.isArray(data.groups) || data.groups.length === 0) {
@@ -120,6 +123,16 @@
       data.currentMemberId = activeGroup.memberIds[0];
     }
 
+    if (data.version === 3) {
+      data.movies.forEach(function (movie) {
+        Object.keys(movie.ratings || {}).forEach(function (groupId) {
+          Object.keys(movie.ratings[groupId] || {}).forEach(function (memberId) {
+            movie.ratings[groupId][memberId] = Math.max(1, movie.ratings[groupId][memberId]);
+          });
+        });
+      });
+    }
+
     const movieIds = new Set();
     data.movies.forEach(function (movie) {
       if (!movie || typeof movie.id !== "string" || !movie.id ||
@@ -131,6 +144,12 @@
       }
 
       movieIds.add(movie.id);
+      if (typeof movie.groupId !== "string" || !groupIds.has(movie.groupId)) {
+        movie.groupId = data.currentGroupId;
+      }
+      if (!movie.bonuses || typeof movie.bonuses !== "object") {
+        movie.bonuses = {};
+      }
       Object.keys(movie.ratings).forEach(function (groupId) {
         const group = data.groups.find(function (item) { return item.id === groupId; });
         if (!group) {
@@ -142,14 +161,26 @@
         }
         Object.keys(ratings).forEach(function (memberId) {
           const score = ratings[memberId];
-          if (!group.memberIds.includes(memberId) || !Number.isFinite(score) || score < 0 || score > 5) {
+          if (!group.memberIds.includes(memberId) || !Number.isFinite(score) || score < 1 || score > 5) {
             throw new Error("Una de las puntuaciones de la copia no es válida.");
+          }
+        });
+      });
+      Object.keys(movie.bonuses).forEach(function (groupId) {
+        const group = data.groups.find(function (item) { return item.id === groupId; });
+        const bonuses = movie.bonuses[groupId];
+        if (!group || !bonuses || typeof bonuses !== "object") {
+          throw new Error("Los bonus de la copia no son válidos.");
+        }
+        Object.keys(bonuses).forEach(function (memberId) {
+          if (!group.memberIds.includes(memberId) || typeof bonuses[memberId] !== "boolean") {
+            throw new Error("Los bonus de la copia no son válidos.");
           }
         });
       });
     });
 
-    data.version = 3;
+    data.version = 4;
     return data;
   }
 
@@ -266,6 +297,12 @@
       container.hidden = false;
 
       container.querySelectorAll(".movie-suggestion").forEach(function (button) {
+        button.addEventListener("pointerdown", function (event) {
+          event.preventDefault();
+        });
+      });
+
+      container.querySelectorAll(".movie-suggestion").forEach(function (button) {
         button.addEventListener("click", function () {
           document.getElementById("movieTitle").value = button.dataset.title;
           document.getElementById("moviePoster").value = button.dataset.poster;
@@ -317,21 +354,25 @@
 
   function ratingOptions(selected) {
     let options = '<option value="">Elige…</option>';
-    for (let step = 0; step <= 50; step += 1) {
-      const score = step / 10;
-      const label = score.toLocaleString("es-ES", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    for (let step = 100; step <= 500; step += 5) {
+      const score = step / 100;
+      const label = formatScore(score);
       options += '<option value="' + score + '"' + (score === selected ? " selected" : "") + ">★ " + label + " / 5</option>";
     }
     return options;
   }
 
+  function formatScore(score) {
+    return Number(score).toLocaleString("es-ES", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 2
+    });
+  }
+
   function starRating(score) {
     const safeScore = Math.max(0, Math.min(5, Number(score) || 0));
     const width = (safeScore / 5 * 100).toFixed(1);
-    const label = safeScore.toLocaleString("es-ES", {
-      minimumFractionDigits: 1,
-      maximumFractionDigits: 1
-    });
+    const label = formatScore(safeScore);
     return '<span class="star-rating" role="img" aria-label="' + label + ' de 5 estrellas">' +
       '<span class="star-empty" aria-hidden="true">★★★★★</span>' +
       '<span class="star-fill" aria-hidden="true" style="width:' + width + '%">★★★★★</span>' +
@@ -343,6 +384,9 @@
     const groupMembers = activeGroup ? getGroupMembers(activeGroup) : [];
     const groupRatings = activeGroup && movie.ratings[activeGroup.id]
       ? movie.ratings[activeGroup.id]
+      : {};
+    const groupBonuses = activeGroup && movie.bonuses && movie.bonuses[activeGroup.id]
+      ? movie.bonuses[activeGroup.id]
       : {};
     const votes = Object.keys(groupRatings);
     const isComplete = groupMembers.every(function (member) {
@@ -360,18 +404,15 @@
         return sum + groupRatings[member.id];
       }, 0);
       const averageScore = total / groupMembers.length;
-      const average = averageScore.toLocaleString("es-ES", {
-        minimumFractionDigits: 1,
-        maximumFractionDigits: 1
-      });
+      const average = formatScore(averageScore);
       const scores = groupMembers.map(function (member) {
         const scoreValue = groupRatings[member.id];
-        const score = scoreValue.toLocaleString("es-ES", {
-          minimumFractionDigits: 1,
-          maximumFractionDigits: 1
-        });
+        const score = formatScore(scoreValue);
+        const bonus = groupBonuses[member.id]
+          ? '<span class="bonus-badge" title="Bonus favorito">★ BONUS</span>'
+          : "";
         return '<span class="score-chip">' + escapeHtml(member.name) + " · " +
-          starRating(scoreValue) + ' <b>' + score + "</b></span>";
+          starRating(scoreValue) + ' <b>' + score + "</b>" + bonus + "</span>";
       }).join("");
       voteContent = '<div class="score-summary"><div class="average-score">' + starRating(averageScore) + ' <b>' + average + '</b>' +
         ' <small>/ 5 media</small></div><div class="member-scores">' + scores + "</div></div>";
@@ -387,9 +428,11 @@
 
     const showRatingForm = movie.watched && (!isComplete || isEditing);
     if (showRatingForm && (memberVote === undefined || isEditing)) {
+      const bonusChecked = groupBonuses[state.currentMemberId] ? " checked" : "";
       voteContent += '<form class="rating-form" data-movie-id="' + escapeHtml(movie.id) + '">' +
         '<label>Tu nota<select name="score" required aria-label="Tu nota para ' + escapeHtml(movie.title) + '">' +
         ratingOptions(memberVote) + '</select></label>' +
+        '<label class="bonus-toggle"><input type="checkbox" name="bonus"' + bonusChecked + '> <span>5 bonus</span></label>' +
         '<button class="button button-primary" type="submit">' +
         (memberVote === undefined ? "Guardar voto" : "Actualizar nota") + "</button></form>";
     }
@@ -429,6 +472,9 @@
     renderMemberPicker();
     renderGroupPicker();
     const filtered = state.movies.filter(function (movie) {
+      if (movie.groupId !== state.currentGroupId) {
+        return false;
+      }
       const matchesFilter = activeFilter === "all" ||
         (activeFilter === "watchlist" && !movie.watched) ||
         (activeFilter === "watched" && movie.watched);
@@ -473,11 +519,14 @@
       return 0;
     });
 
-    document.getElementById("movieCount").textContent = String(state.movies.length);
+    const activeMovieCount = state.movies.filter(function (movie) {
+      return movie.groupId === state.currentGroupId;
+    }).length;
+    document.getElementById("movieCount").textContent = String(activeMovieCount);
     movieList.innerHTML = withSort.map(renderMovie).join("");
     emptyState.hidden = withSort.length !== 0;
     if (!withSort.length) {
-      const hasMovies = state.movies.length > 0;
+      const hasMovies = activeMovieCount > 0;
       document.getElementById("emptyTitle").textContent = hasMovies ? "No hay resultados" : "Aún no hay películas";
       document.getElementById("emptyCopy").textContent = hasMovies
         ? "Prueba con otro título o cambia el filtro."
@@ -548,8 +597,8 @@
     }
     const next = cloneState();
     next.groups = next.groups.filter(function (group) { return group.id !== groupId; });
-    next.movies.forEach(function (movie) {
-      delete movie.ratings[groupId];
+    next.movies = next.movies.filter(function (movie) {
+      return movie.groupId !== groupId;
     });
     next.currentGroupId = next.groups[0].id;
     next.currentMemberId = next.groups[0].memberIds[0];
@@ -616,7 +665,8 @@
     }
 
     const alreadyExists = state.movies.some(function (movie) {
-      return movie.title.toLocaleLowerCase("es") === title.toLocaleLowerCase("es");
+      return movie.groupId === state.currentGroupId &&
+        movie.title.toLocaleLowerCase("es") === title.toLocaleLowerCase("es");
     });
     if (alreadyExists) {
       showMessage("Esa película ya está en vuestra colección.", true);
@@ -629,6 +679,8 @@
       title: title,
       poster: poster,
       watched: document.getElementById("alreadyWatched").checked,
+      groupId: next.currentGroupId,
+      bonuses: {},
       ratings: {}
     });
     if (saveData(next)) {
@@ -740,12 +792,12 @@
     event.preventDefault();
     const rawScore = new FormData(form).get("score");
     if (!rawScore) {
-      showMessage("Elige una nota del 0 al 5.", true);
+      showMessage("Elige una nota del 1 al 5.", true);
       return;
     }
     const score = Number(rawScore);
-    if (!Number.isFinite(score) || score < 0 || score > 5) {
-      showMessage("Elige una nota del 0 al 5.", true);
+    if (!Number.isFinite(score) || score < 1 || score > 5) {
+      showMessage("Elige una nota del 1 al 5.", true);
       return;
     }
 
@@ -759,6 +811,13 @@
     }
     movie.ratings[next.currentGroupId] = movie.ratings[next.currentGroupId] || {};
     movie.ratings[next.currentGroupId][next.currentMemberId] = score;
+    movie.bonuses = movie.bonuses || {};
+    movie.bonuses[next.currentGroupId] = movie.bonuses[next.currentGroupId] || {};
+    if (new FormData(form).has("bonus")) {
+      movie.bonuses[next.currentGroupId][next.currentMemberId] = true;
+    } else {
+      delete movie.bonuses[next.currentGroupId][next.currentMemberId];
+    }
     if (saveData(next)) {
       editingMovieId = null;
       render();

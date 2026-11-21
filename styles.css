@@ -225,6 +225,8 @@ h1 span {
   left: 0;
   width: min(430px, calc(100vw - 76px));
   max-height: 360px;
+  touch-action: manipulation;
+  overscroll-behavior: contain;
   overflow-y: auto;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -532,6 +534,29 @@ input::placeholder {
   padding: 0 11px;
 }
 
+.bonus-toggle {
+  display: flex !important;
+  flex-direction: row;
+  align-items: center;
+  min-height: 36px;
+  gap: 6px !important;
+  color: var(--text) !important;
+  white-space: nowrap;
+}
+
+.bonus-toggle input {
+  accent-color: var(--accent);
+}
+
+.bonus-badge {
+  padding: 2px 5px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--accent-dark);
+  font-size: 8px;
+  font-weight: 800;
+}
+
 .movie-actions {
   display: flex;
   align-items: center;
@@ -825,6 +850,12 @@ input::placeholder {
 
   .title-search {
     flex-basis: 100%;
+    min-width: 0;
+  }
+
+  .movie-suggestions {
+    width: 100%;
+    max-height: 42vh;
   }
 
   .add-form > input[type="url"] {
