@@ -4,6 +4,20 @@
   const STORAGE_KEY = "la-sala-data-v1";
   const TMDB_KEY_STORAGE = "la-sala-tmdb-key";
   const MEMBER_IDS = ["member-1", "member-2", "member-3", "member-4"];
+  const RATING_VALUES = [1, 1.1, 1.25, 1.4, 1.5, 1.6, 1.75, 1.9];
+  for (let whole = 2; whole <= 4; whole += 1) {
+    RATING_VALUES.push(
+      whole,
+      whole + 0.1,
+      whole + 0.25,
+      whole + 0.4,
+      whole + 0.5,
+      whole + 0.6,
+      whole + 0.75,
+      whole + 0.9
+    );
+  }
+  RATING_VALUES.push(5);
   const workspace = document.getElementById("workspace");
   const movieList = document.getElementById("movieList");
   const emptyState = document.getElementById("emptyState");
@@ -23,9 +37,19 @@
   let suggestionTimer;
   let suggestionRequest = 0;
 
+  function normalizeRating(score) {
+    const safeScore = Number(score);
+    if (!Number.isFinite(safeScore)) {
+      return null;
+    }
+    return RATING_VALUES.reduce(function (nearest, value) {
+      return Math.abs(value - safeScore) < Math.abs(nearest - safeScore) ? value : nearest;
+    }, RATING_VALUES[0]);
+  }
+
   function emptyData() {
     return {
-      version: 4,
+      version: 5,
       members: [],
       groups: [],
       currentMemberId: "",
@@ -35,7 +59,7 @@
   }
 
   function validateData(data, allowEmptyGroup) {
-    if (!data || (data.version !== 1 && data.version !== 2 && data.version !== 3 && data.version !== 4) || !Array.isArray(data.members) || !Array.isArray(data.movies)) {
+    if (!data || (data.version !== 1 && data.version !== 2 && data.version !== 3 && data.version !== 4 && data.version !== 5) || !Array.isArray(data.members) || !Array.isArray(data.movies)) {
       throw new Error("El archivo no tiene el formato de copia esperado.");
     }
 
@@ -67,6 +91,7 @@
             throw new Error("Una de las puntuaciones de la copia no es válida.");
           }
           score = Math.max(1, score);
+          score = normalizeRating(score);
           nestedRatings["group-1"] = nestedRatings["group-1"] || {};
           nestedRatings["group-1"][memberId] = score;
         });
@@ -80,7 +105,7 @@
       data.groups = [];
     }
     if (data.members.length === 0 && allowEmptyGroup && data.groups.length === 0) {
-      data.version = 4;
+      data.version = 5;
       return data;
     }
     if (!Array.isArray(data.groups) || data.groups.length === 0) {
@@ -123,11 +148,11 @@
       data.currentMemberId = activeGroup.memberIds[0];
     }
 
-    if (data.version === 3) {
+    if (data.version === 3 || data.version === 4) {
       data.movies.forEach(function (movie) {
         Object.keys(movie.ratings || {}).forEach(function (groupId) {
           Object.keys(movie.ratings[groupId] || {}).forEach(function (memberId) {
-            movie.ratings[groupId][memberId] = Math.max(1, movie.ratings[groupId][memberId]);
+            movie.ratings[groupId][memberId] = normalizeRating(movie.ratings[groupId][memberId]);
           });
         });
       });
@@ -161,7 +186,8 @@
         }
         Object.keys(ratings).forEach(function (memberId) {
           const score = ratings[memberId];
-          if (!group.memberIds.includes(memberId) || !Number.isFinite(score) || score < 1 || score > 5) {
+          ratings[memberId] = normalizeRating(score);
+          if (!group.memberIds.includes(memberId) || RATING_VALUES.indexOf(ratings[memberId]) === -1) {
             throw new Error("Una de las puntuaciones de la copia no es válida.");
           }
         });
@@ -180,7 +206,7 @@
       });
     });
 
-    data.version = 4;
+    data.version = 5;
     return data;
   }
 
@@ -354,17 +380,16 @@
 
   function ratingOptions(selected) {
     let options = '<option value="">Elige…</option>';
-    for (let step = 100; step <= 500; step += 5) {
-      const score = step / 100;
+    RATING_VALUES.forEach(function (score) {
       const label = formatScore(score);
       options += '<option value="' + score + '"' + (score === selected ? " selected" : "") + ">★ " + label + " / 5</option>";
-    }
+    });
     return options;
   }
 
   function formatScore(score) {
     return Number(score).toLocaleString("es-ES", {
-      minimumFractionDigits: 1,
+      minimumFractionDigits: 0,
       maximumFractionDigits: 2
     });
   }
@@ -796,7 +821,7 @@
       return;
     }
     const score = Number(rawScore);
-    if (!Number.isFinite(score) || score < 1 || score > 5) {
+    if (RATING_VALUES.indexOf(score) === -1) {
       showMessage("Elige una nota del 1 al 5.", true);
       return;
     }
